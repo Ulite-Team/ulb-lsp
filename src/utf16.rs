@@ -98,6 +98,37 @@ pub fn position_to_offset(source: &str, position: Position) -> Option<u32> {
     Some(byte as u32)
 }
 
+/// Converts a UTF-16 [`Range`] into `(start, end)` byte offsets into
+/// `source` — the inverse of [`span_to_range`], used to locate the region
+/// an incremental content change replaces.
+///
+/// Boundary semantics match [`position_to_offset`]: a column past its line
+/// clamps to the line end, a column inside a surrogate pair clamps to the
+/// pair's start, and a position past the last line clamps to the end of
+/// the source. The end offset never precedes the start.
+///
+/// # Examples
+///
+/// ```
+/// use lsp_types::{Position, Range};
+/// use ulb_lsp::utf16::range_to_offsets;
+///
+/// let source = "android { version 1 }";
+/// let range = Range::new(Position::new(0, 9), Position::new(0, 16));
+/// assert_eq!(range_to_offsets(source, range), (9, 16));
+/// ```
+#[must_use]
+pub fn range_to_offsets(source: &str, range: Range) -> (u32, u32) {
+    let len = source.len() as u32;
+    let start = position_to_offset(source, range.start)
+        .unwrap_or(len)
+        .min(len);
+    let end = position_to_offset(source, range.end)
+        .unwrap_or(len)
+        .min(len);
+    (start, end.max(start))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,5 +211,42 @@ mod tests {
         // '🦀' is two utf16 units; a column inside the pair clamps to its start.
         assert_eq!(position_to_offset(source, pos(0, 1)), Some(0));
         assert_eq!(position_to_offset(source, pos(0, 2)), Some(4));
+    }
+
+    #[test]
+    fn range_to_offsets_roundtrips_span_to_range() {
+        let source = "line one\ncompileSdk 37";
+        for span in [
+            Span { start: 0, end: 4 },
+            Span { start: 9, end: 15 },
+            Span { start: 19, end: 21 },
+        ] {
+            let range = span_to_range(source, span);
+            assert_eq!(range_to_offsets(source, range), (span.start, span.end));
+        }
+    }
+
+    #[test]
+    fn range_to_offsets_multibyte_and_surrogate_boundaries() {
+        let source = "تصيير x";
+        // Bytes 11..12, utf16 columns 6..7.
+        assert_eq!(
+            range_to_offsets(source, Range::new(pos(0, 6), pos(0, 7))),
+            (11, 12)
+        );
+        // '🦀' occupies bytes 0..4; a boundary inside the pair clamps to 0.
+        assert_eq!(
+            range_to_offsets("🦀 x", Range::new(pos(0, 1), pos(0, 2))),
+            (0, 4)
+        );
+    }
+
+    #[test]
+    fn range_to_offsets_end_past_last_line_clamps_to_source_end() {
+        let source = "ab";
+        assert_eq!(
+            range_to_offsets(source, Range::new(pos(0, 0), pos(1, 0))),
+            (0, 2)
+        );
     }
 }

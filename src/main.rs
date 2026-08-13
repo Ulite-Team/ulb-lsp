@@ -4,15 +4,16 @@
 //! open documents, runs the analysis engine on every `didChange`, and
 //! publishes the resulting diagnostics. All analysis lives in the library.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, InitializedParams, OneOf, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, Url,
+    Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, OneOf,
+    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -21,10 +22,12 @@ use ulb_lsp::document::Document;
 use ulb_lsp::role::{Role, role_of};
 
 /// The server backend: the tower-lsp client handle plus the shared analysis
-/// engine.
+/// engine and the last diagnostics published per document (so unchanged
+/// results are not resent).
 struct Backend {
     client: Client,
     engine: Mutex<DiagnosticEngine<DiskLoader>>,
+    last_published: Mutex<HashMap<Url, Vec<Diagnostic>>>,
 }
 
 impl Backend {
@@ -32,6 +35,7 @@ impl Backend {
         Self {
             client,
             engine: Mutex::new(DiagnosticEngine::new()),
+            last_published: Mutex::new(HashMap::new()),
         }
     }
 
@@ -39,13 +43,21 @@ impl Backend {
         uri.path().ends_with(".ulb")
     }
 
-    /// Publishes diagnostics for one document.
+    /// Publishes diagnostics for one document unless they are unchanged
+    /// since the last publish.
     async fn publish(&self, uri: Url) {
         let diagnostics = self
             .engine
             .lock()
             .expect("engine lock")
             .diagnostics_for(&uri);
+        {
+            let mut published = self.last_published.lock().expect("published lock");
+            if published.get(&uri) == Some(&diagnostics) {
+                return;
+            }
+            published.insert(uri.clone(), diagnostics.clone());
+        }
         self.client
             .publish_diagnostics(uri, diagnostics, None)
             .await;
@@ -70,7 +82,7 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
                         open_close: Some(true),
-                        change: Some(TextDocumentSyncKind::FULL),
+                        change: Some(TextDocumentSyncKind::INCREMENTAL),
                         save: Some(TextDocumentSyncSaveOptions::Supported(true)),
                         ..Default::default()
                     },
@@ -112,13 +124,22 @@ impl LanguageServer for Backend {
         if !Self::is_ulb_file(&uri) {
             return;
         }
-        let Some(change) = params.content_changes.into_iter().last() else {
-            return;
-        };
-        self.engine.lock().expect("engine lock").upsert(
-            uri.clone(),
-            Document::new(change.text, params.text_document.version),
-        );
+        let version = params.text_document.version;
+        {
+            let mut engine = self.engine.lock().expect("engine lock");
+            let mut applied = false;
+            for change in &params.content_changes {
+                applied |= engine.apply_change(&uri, version, change.range, change.text.clone());
+            }
+            if !applied {
+                // The document is not tracked (e.g. the server started
+                // after the buffer was already open): the last change
+                // carries the full current text, so adopt it as-is.
+                if let Some(change) = params.content_changes.into_iter().last() {
+                    engine.upsert(uri.clone(), Document::new(change.text, version));
+                }
+            }
+        }
         self.publish(uri.clone()).await;
         if role_of(&uri) == Role::Conventions {
             self.republish_builds().await;
@@ -131,6 +152,15 @@ impl LanguageServer for Backend {
             return;
         }
         self.publish(uri).await;
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+        self.engine.lock().expect("engine lock").close(&uri);
+        self.last_published
+            .lock()
+            .expect("published lock")
+            .remove(&uri);
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {

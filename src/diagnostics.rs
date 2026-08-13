@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use lsp_types::{Diagnostic, DiagnosticSeverity, Url};
+use lsp_types::{Diagnostic, DiagnosticSeverity, Range, Url};
 use ulb_lang::ast::{ElseBranch, IfKind, Statement, StatementKind};
 use ulb_lang::diagnostic::Severity;
 use ulb_lang::eval::{Definitions, collect_definitions_lint, evaluate_build_lint};
@@ -77,6 +77,19 @@ impl<L: SourceLoader> DiagnosticEngine<L> {
     /// Inserts or replaces the open document at `uri`.
     pub fn upsert(&mut self, uri: Url, document: Document) {
         self.store.upsert(uri, document);
+    }
+
+    /// Applies an incremental change to the open document at `uri`,
+    /// updating its version. Returns whether a document was present and
+    /// updated.
+    pub fn apply_change(
+        &mut self,
+        uri: &Url,
+        version: i32,
+        range: Option<Range>,
+        replacement: String,
+    ) -> bool {
+        self.store.apply_change(uri, version, range, replacement)
     }
 
     /// Closes the document at `uri`.
