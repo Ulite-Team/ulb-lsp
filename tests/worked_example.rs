@@ -1,0 +1,159 @@
+//! End-to-end engine tests against realistic project sources, modeled on
+//! the `examples/sample-kmp` worked example in the Uliab repository.
+
+use lsp_types::Url;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use ulb_lsp::diagnostics::{DiagnosticEngine, SourceLoader};
+use ulb_lsp::document::Document;
+
+struct MapLoader(HashMap<PathBuf, String>);
+
+impl SourceLoader for MapLoader {
+    fn load(&self, path: &Path) -> Option<String> {
+        self.0.get(path).cloned()
+    }
+}
+
+const CONVENTIONS: &str = r#"
+convention androidApp {
+  android {
+    compileSdk 37
+    minSdk 24
+    targetSdk 37
+  }
+  buildTypes {
+    release { minifyEnabled true }
+  }
+}
+
+convention envSigning {
+  signing {
+    storeFile     props("signing.properties").storeFile
+    storePassword env("STORE_PASSWORD")
+  }
+}
+
+fn defaultDebug() {
+  buildTypes { debug { minifyEnabled false } }
+}
+"#;
+
+const BUILD: &str = r#"
+plugin "android-application"
+
+apply "androidApp"
+apply "envSigning"
+
+android {
+  namespace "com.example.app"
+  applicationId "com.example.app"
+  versionCode 7
+  versionName ver(major=0, minor=1, patch=2)
+}
+
+buildTypes {
+  release {
+    proguardFiles [ "proguard-rules.pro" ]
+  }
+}
+
+productFlavors {
+  dimension "tier"
+  free { applicationIdSuffix ".free" }
+  paid { applicationIdSuffix ".paid" }
+}
+
+signing {
+  keyAlias    props("signing.properties").keyAlias
+  keyPassword env("KEY_PASSWORD")
+}
+
+deps {
+  implementation "androidx.core:core-ktx" @ coreVersion
+  implementation appcompat
+}
+
+commonMain.deps {
+  implementation kotlinxCoroutines
+}
+androidMain.deps {
+  implementation "org.jetbrains.compose.ui:ui" @ composeVersion
+}
+
+defaultDebug()
+
+task "printConfig" {
+  description "Prints the resolved module configuration."
+  dependsOn [ "compileReleaseKotlin", "bundleRelease" ]
+  run {
+    exec(command="echo", args=["hello", "from", "ulb"])
+    copy(from="src/main/kotlin", to="out/merged-kotlin")
+  }
+}
+"#;
+
+fn url(path: &str) -> Url {
+    Url::from_file_path(path).expect("absolute file path")
+}
+
+#[test]
+fn worked_example_project_reports_no_diagnostics() {
+    let mut loader = HashMap::new();
+    loader.insert(
+        PathBuf::from("/proj/conventions.ulb"),
+        CONVENTIONS.to_owned(),
+    );
+    let mut engine = DiagnosticEngine::with_loader(MapLoader(loader));
+    let build = url("/proj/build.ulb");
+    engine.upsert(build.clone(), Document::new(BUILD.to_owned(), 1));
+    let diagnostics = engine.diagnostics_for(&build);
+    assert!(
+        diagnostics.is_empty(),
+        "expected no diagnostics, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn worked_example_plus_unknown_apply_flags_one_error() {
+    let mut loader = HashMap::new();
+    loader.insert(
+        PathBuf::from("/proj/conventions.ulb"),
+        CONVENTIONS.to_owned(),
+    );
+    let mut engine = DiagnosticEngine::with_loader(MapLoader(loader));
+    let build = url("/proj/build.ulb");
+    engine.upsert(
+        build.clone(),
+        Document::new(format!("{BUILD}\napply \"nonexistent\"\n"), 1),
+    );
+    let diagnostics = engine.diagnostics_for(&build);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].message, "unknown convention 'nonexistent'");
+    let range = diagnostics[0].range;
+    assert_eq!(range.start.line, 53);
+    assert_eq!(range.end.line, 53);
+}
+
+#[test]
+fn mid_edit_source_still_produces_parse_diagnostics() {
+    let mut engine = DiagnosticEngine::new();
+    let build = url("/proj/build.ulb");
+    engine.upsert(
+        build.clone(),
+        Document::new(
+            "apply \"androidApp\"\nandroid {\n  compileSdk \n}\n".to_owned(),
+            1,
+        ),
+    );
+    let diagnostics = engine.diagnostics_for(&build);
+    assert!(
+        !diagnostics.is_empty(),
+        "a missing value after the key must surface a parse error"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d.severity == Some(lsp_types::DiagnosticSeverity::ERROR))
+    );
+}

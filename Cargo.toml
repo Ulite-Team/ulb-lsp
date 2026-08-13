@@ -1,0 +1,25 @@
+[package]
+name = "ulb-lsp"
+description = "Language server for the ulb build DSL, built on the ulb-lang parser and AST"
+edition = "2024"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+keywords = ["build", "dsl", "lsp"]
+categories = ["development-tools::build-utils"]
+
+[lib]
+name = "ulb_lsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ulb-lsp"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+ulb-lang = { path = "../Uliab/crates/ulb-lang" }
+lsp-types = "0.94"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std"] }
+tower-lsp = "0.20"
