@@ -29,10 +29,12 @@
 
 pub mod diagnostics;
 pub mod document;
+pub mod navigation;
 pub mod role;
 pub mod utf16;
 
 pub use diagnostics::{DiagnosticEngine, DiskLoader, SourceLoader};
 pub use document::{Document, DocumentStore};
+pub use navigation::ConventionLocation;
 pub use role::{Role, role_of};
-pub use utf16::span_to_range;
+pub use utf16::{position_to_offset, span_to_range};

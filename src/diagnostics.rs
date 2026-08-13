@@ -229,7 +229,7 @@ impl<L: SourceLoader> DiagnosticEngine<L> {
 
     /// The text at `uri`: the open document if there is one, otherwise the
     /// loader for the underlying file path.
-    fn text_of(&self, uri: &Url) -> Option<String> {
+    pub(crate) fn text_of(&self, uri: &Url) -> Option<String> {
         if let Some(document) = self.store.get(uri) {
             return Some(document.text.clone());
         }

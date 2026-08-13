@@ -9,7 +9,8 @@ use std::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    InitializeParams, InitializeResult, InitializedParams, ServerCapabilities, ServerInfo,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, InitializedParams, OneOf, ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, Url,
 };
@@ -74,6 +75,8 @@ impl LanguageServer for Backend {
                         ..Default::default()
                     },
                 )),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -128,6 +131,33 @@ impl LanguageServer for Backend {
             return;
         }
         self.publish(uri).await;
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let position = params.text_document_position_params;
+        if !Self::is_ulb_file(&position.text_document.uri) {
+            return Ok(None);
+        }
+        Ok(self
+            .engine
+            .lock()
+            .expect("engine lock")
+            .hover(&position.text_document.uri, position.position))
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let position = params.text_document_position_params;
+        if !Self::is_ulb_file(&position.text_document.uri) {
+            return Ok(None);
+        }
+        Ok(self
+            .engine
+            .lock()
+            .expect("engine lock")
+            .goto_definition(&position.text_document.uri, position.position))
     }
 }
 
