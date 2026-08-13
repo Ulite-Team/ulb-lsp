@@ -15,8 +15,15 @@
 //!    which is what makes mid-edit source useful (the parser never fails
 //!    fast; GRAMMAR.md §11).
 //! 2. For a `build.ulb`, the engine additionally resolves the project's
-//!    `conventions.ulb` and flags every `apply "name"` that names a
-//!    convention that is not defined.
+//!    `conventions.ulb` and `libs.ulb` and runs the evaluator in **lint
+//!    mode** ([`ulb_lang::eval::evaluate_build_lint`]): `env`/`props`
+//!    lookups never touch the process or filesystem, so the editor reports
+//!    name, type, arity, and role-violation diagnostics without lying
+//!    about a build-time environment it cannot see.
+//! 3. The unknown-convention check stays a targeted AST walk rather than
+//!    relying on the evaluator, so `apply "name"` statements are checked
+//!    in *both* branches of an `if`, regardless of whether the condition
+//!    is statically true.
 
 #![warn(missing_docs)]
 

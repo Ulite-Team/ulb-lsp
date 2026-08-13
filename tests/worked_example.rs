@@ -39,6 +39,18 @@ fn defaultDebug() {
 }
 "#;
 
+const LIBS: &str = r#"
+versions {
+  coreVersion = "1.15.0"
+  composeVersion = "1.8.0"
+}
+
+appcompat = "androidx.appcompat:appcompat:1.7.0"
+coreKtx   = "androidx.core:core-ktx" @ coreVersion
+ui        = "org.jetbrains.compose.ui:ui" @ composeVersion
+kotlinxCoroutines = "org.jetbrains.kotlinx:kotlinx-coroutines-core" @ "1.9.0"
+"#;
+
 const BUILD: &str = r#"
 plugin "android-application"
 
@@ -97,14 +109,19 @@ fn url(path: &str) -> Url {
     Url::from_file_path(path).expect("absolute file path")
 }
 
-#[test]
-fn worked_example_project_reports_no_diagnostics() {
-    let mut loader = HashMap::new();
-    loader.insert(
+fn loader_with_project() -> MapLoader {
+    let mut map = HashMap::new();
+    map.insert(
         PathBuf::from("/proj/conventions.ulb"),
         CONVENTIONS.to_owned(),
     );
-    let mut engine = DiagnosticEngine::with_loader(MapLoader(loader));
+    map.insert(PathBuf::from("/proj/libs.ulb"), LIBS.to_owned());
+    MapLoader(map)
+}
+
+#[test]
+fn worked_example_project_reports_no_diagnostics() {
+    let mut engine = DiagnosticEngine::with_loader(loader_with_project());
     let build = url("/proj/build.ulb");
     engine.upsert(build.clone(), Document::new(BUILD.to_owned(), 1));
     let diagnostics = engine.diagnostics_for(&build);
@@ -116,12 +133,7 @@ fn worked_example_project_reports_no_diagnostics() {
 
 #[test]
 fn worked_example_plus_unknown_apply_flags_one_error() {
-    let mut loader = HashMap::new();
-    loader.insert(
-        PathBuf::from("/proj/conventions.ulb"),
-        CONVENTIONS.to_owned(),
-    );
-    let mut engine = DiagnosticEngine::with_loader(MapLoader(loader));
+    let mut engine = DiagnosticEngine::with_loader(loader_with_project());
     let build = url("/proj/build.ulb");
     engine.upsert(
         build.clone(),
