@@ -3,7 +3,7 @@ name = "ulb-lsp"
 description = "Language server for the ulb build DSL, built on the ulb-lang parser and AST"
 edition = "2024"
 version = "0.1.0"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0"
 keywords = ["build", "dsl", "lsp"]
 categories = ["development-tools::build-utils"]
 
