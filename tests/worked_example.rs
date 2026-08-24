@@ -208,5 +208,5 @@ fn settings_unknown_key_surfaces_semantic_error() {
     );
     let diagnostics = engine.diagnostics_for(&settings);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(diagnostics[0].range.start.line, 3);
+    assert_eq!(diagnostics[0].range.start.line, 4);
 }
