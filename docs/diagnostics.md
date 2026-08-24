@@ -7,7 +7,7 @@ it returns.
 ## Entry point
 
 `DiagnosticEngine::diagnostics_for(uri)` produces the diagnostic list for
-one open document, in three passes:
+one open document, in four passes:
 
 1. `parse_diagnostics` — every lexer/parser diagnostic from `ulb-lang`,
    mapped with its real span and severity (`source: "ulb-lang"`).
@@ -15,6 +15,12 @@ one open document, in three passes:
    reporting `apply "name"` where `name` is not defined.
 3. For a `build.ulb` only: `evaluation_diagnostics` — the evaluator run in
    lint mode, its diagnostics mapped the same way.
+4. For a `settings.ulb` only: `settings_diagnostics` — the settings
+   evaluator (GRAMMAR.md §6.1) run over the document, reporting unknown
+   keys, duplicate declarations, and malformed blocks. The evaluator
+   re-parses internally and its outcome includes the parse diagnostics of
+   pass 1 verbatim; those are filtered out by matching range and message,
+   so no diagnostic is reported twice.
 
 A document that is not open returns an empty list; the server never asks
 about anything else.

@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Build, Clippy, Fmt, Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # The crate depends on ulb-lang via a sibling path dependency
+      # (`../Uliab/crates/ulb-lang`). Uliab is public, so a plain checkout
+      # of its default branch is enough — always lint/test against current
+      # Uliab main to catch drift immediately.
+      - id: uliab
+        name: Checkout Uliab sibling
+        uses: actions/checkout@v4
+        with:
+          repository: Ulite-Team/Uliab
+          ref: main
+          path: uliab-sibling
+
+      # Keyed on the checked-out Uliab commit so a moving Uliab main busts
+      # the cache instead of serving stale ulb-lang artifacts (path-dep
+      # contents do not fold into rust-cache's default key).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v2
+          key: uliab-${{ steps.uliab.outputs.commit }}
+
+      - name: Expose the sibling at the expected path
+        run: ln -sfn "$GITHUB_WORKSPACE/uliab-sibling" "$(dirname "$GITHUB_WORKSPACE")/Uliab"
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build all targets
+        run: cargo build --workspace --all-targets
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --all-targets
+
+      - name: Run doc tests
+        run: cargo test --workspace --doc

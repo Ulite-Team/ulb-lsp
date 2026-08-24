@@ -1,6 +1,6 @@
 //! The analysis engine: parses open documents and maps `ulb-lang`
-//! diagnostics (plus evaluator diagnostics and convention-resolution
-//! checks) onto the LSP protocol.
+//! diagnostics (plus evaluator diagnostics, settings-evaluation
+//! diagnostics, and convention-resolution checks) onto the LSP protocol.
 //!
 //! Everything here is synchronous and independent of the LSP runtime so
 //! tests can drive it directly; the server in `main.rs` is a thin adapter
@@ -12,7 +12,9 @@ use std::path::Path;
 use lsp_types::{Diagnostic, DiagnosticSeverity, Range, Url};
 use ulb_lang::ast::{ElseBranch, IfKind, Statement, StatementKind};
 use ulb_lang::diagnostic::Severity;
-use ulb_lang::eval::{Definitions, collect_definitions_lint, evaluate_build_lint};
+use ulb_lang::eval::{
+    Definitions, collect_definitions_lint, evaluate_build_lint, evaluate_settings,
+};
 use ulb_lang::parser::{Parsed, parse};
 
 use crate::document::{Document, DocumentStore};
@@ -49,7 +51,9 @@ impl SourceLoader for DiskLoader {
 /// (unknown references/functions, arity and type errors, role violations),
 /// and separately walk the AST to report `apply "name"` statements whose
 /// convention is not defined — in both branches of an `if`, independent of
-/// the evaluator's control flow.
+/// the evaluator's control flow. For a `settings.ulb`: run the settings
+/// evaluator (GRAMMAR.md §6.1) and report its semantic diagnostics
+/// (unknown keys, duplicate declarations, malformed blocks).
 #[derive(Debug)]
 pub struct DiagnosticEngine<L> {
     store: DocumentStore,
@@ -153,11 +157,44 @@ impl<L: SourceLoader> DiagnosticEngine<L> {
         };
         let parsed = parse(&document.text);
         let mut out = parse_diagnostics(&document.text, &parsed);
-        if role_of(uri) == Role::Build {
-            out.extend(self.unknown_convention_diagnostics(uri, document, &parsed));
-            out.extend(self.evaluation_diagnostics(uri, &document.text, &parsed));
+        match role_of(uri) {
+            Role::Build => {
+                out.extend(self.unknown_convention_diagnostics(uri, document, &parsed));
+                out.extend(self.evaluation_diagnostics(uri, &document.text, &parsed));
+            }
+            Role::Settings => out.extend(self.settings_diagnostics(&document.text, &out)),
+            _ => {}
         }
         out
+    }
+
+    /// Runs the settings evaluator over a `settings.ulb` and maps its
+    /// diagnostics onto the protocol. The evaluator re-parses internally
+    /// and its outcome includes the parse diagnostics, which are already
+    /// present in `existing` — those are filtered out so no diagnostic is
+    /// reported twice.
+    fn settings_diagnostics(&self, text: &str, existing: &[Diagnostic]) -> Vec<Diagnostic> {
+        let outcome = evaluate_settings(text);
+        outcome
+            .diagnostics
+            .iter()
+            .map(|d| Diagnostic {
+                range: span_to_range(text, d.span),
+                severity: Some(match d.severity {
+                    Severity::Error => DiagnosticSeverity::ERROR,
+                    Severity::Warning => DiagnosticSeverity::WARNING,
+                    Severity::Info => DiagnosticSeverity::INFORMATION,
+                }),
+                source: Some("ulb-lang".to_owned()),
+                message: d.message.clone(),
+                ..Default::default()
+            })
+            .filter(|d| {
+                !existing
+                    .iter()
+                    .any(|e| e.range == d.range && e.message == d.message)
+            })
+            .collect()
     }
 
     /// Runs the evaluator in lint mode over the document's AST and maps its
@@ -549,5 +586,64 @@ if debugBuild {
         let builds = engine.build_uris();
         assert_eq!(builds.len(), 1);
         assert!(builds[0].path().ends_with("build.ulb"));
+    }
+
+    #[test]
+    fn clean_settings_file_has_no_diagnostics() {
+        let mut engine = DiagnosticEngine::new();
+        let settings = url("/proj/settings.ulb");
+        engine.upsert(
+            settings.clone(),
+            Document::new(
+                "project \"MyApp\"\nmodule \"app\"\nlspCompat true\n".to_owned(),
+                1,
+            ),
+        );
+        assert!(engine.diagnostics_for(&settings).is_empty());
+    }
+
+    #[test]
+    fn unknown_settings_key_is_reported() {
+        let mut engine = DiagnosticEngine::new();
+        let settings = url("/proj/settings.ulb");
+        engine.upsert(
+            settings.clone(),
+            Document::new("project \"MyApp\"\nnope 37\n".to_owned(), 1),
+        );
+        let diagnostics = engine.diagnostics_for(&settings);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].range.start.line, 1);
+    }
+
+    #[test]
+    fn duplicate_project_declaration_is_reported_once() {
+        let mut engine = DiagnosticEngine::new();
+        let settings = url("/proj/settings.ulb");
+        engine.upsert(
+            settings.clone(),
+            Document::new("project \"A\"\nproject \"B\"\n".to_owned(), 1),
+        );
+        let diagnostics = engine.diagnostics_for(&settings);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "the parse-level diagnostics must not be duplicated by the settings pass"
+        );
+        assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    #[test]
+    fn non_settings_roles_do_not_run_the_settings_evaluator() {
+        let mut engine = DiagnosticEngine::new();
+        for path in ["/proj/build.ulb", "/proj/libs.ulb", "/proj/conventions.ulb"] {
+            let uri = url(path);
+            // A duplicate project declaration is only a settings-role
+            // violation; other roles must not report it.
+            engine.upsert(
+                uri.clone(),
+                Document::new("project \"A\"\nproject \"B\"\n".to_owned(), 1),
+            );
+            assert!(engine.diagnostics_for(&uri).is_empty(), "{path}");
+        }
     }
 }

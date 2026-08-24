@@ -9,7 +9,7 @@ same typed AST the evaluator uses (`Uliab/crates/ulb-lang`).
 | Document | What it covers |
 |---|---|
 | [architecture.md](architecture.md) | Two-layer design (analysis library + thin server), what analysis is honest about, and the editor-tooling split |
-| [diagnostics.md](diagnostics.md) | The analysis engine: the two passes, role files, and the convention check that walks both `if` branches |
+| [diagnostics.md](diagnostics.md) | The analysis engine: the passes (parse, convention check, build lint, settings lint), role files, and the dedupe contract |
 | [navigation.md](navigation.md) | Hover and goto-definition for `apply "name"` → `conventions.ulb` |
 | [protocol.md](protocol.md) | The server process: capabilities, sync, the publish/dedupe path, republish-on-conventions-edit |
 | [document-model.md](document-model.md) | `Document` / `DocumentStore`: how open-document text and versions are kept |
