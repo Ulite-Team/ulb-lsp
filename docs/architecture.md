@@ -40,7 +40,7 @@ role-specific checks only where the filename allows them:
 
 | File | Role | Extra diagnostics |
 |---|---|---|
-| `settings.ulb` | Settings | none beyond parse |
+| `settings.ulb` | Settings | settings evaluator (unknown keys, duplicate declarations, malformed blocks) |
 | `build.ulb` | Build | evaluator (lint), convention resolution |
 | `conventions.ulb` | Conventions | none beyond parse |
 | `libs.ulb` | Libs | none beyond parse |

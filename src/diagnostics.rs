@@ -174,7 +174,7 @@ impl<L: SourceLoader> DiagnosticEngine<L> {
     /// present in `existing` — those are filtered out so no diagnostic is
     /// reported twice.
     fn settings_diagnostics(&self, text: &str, existing: &[Diagnostic]) -> Vec<Diagnostic> {
-        let outcome = ulb_lang::eval::evaluate_settings(text);
+        let outcome = evaluate_settings(text);
         outcome
             .diagnostics
             .iter()
