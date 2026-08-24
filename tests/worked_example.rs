@@ -49,10 +49,20 @@ appcompat = "androidx.appcompat:appcompat:1.7.0"
 coreKtx   = "androidx.core:core-ktx" @ coreVersion
 ui        = "org.jetbrains.compose.ui:ui" @ composeVersion
 kotlinxCoroutines = "org.jetbrains.kotlinx:kotlinx-coroutines-core" @ "1.9.0"
+
+bundle {
+  ui = [ ui, appcompat ]
+}
+
+plugins {
+  android = "ulite/android" @ "0.3.0"
+  kmp     = "ulite/kmp"     @ "0.3.0"
+}
 "#;
 
 const BUILD: &str = r#"
-plugin "android-application"
+plugin "android"
+plugin "kmp"
 
 apply "androidApp"
 apply "envSigning"
@@ -109,6 +119,11 @@ fn url(path: &str) -> Url {
     Url::from_file_path(path).expect("absolute file path")
 }
 
+const SETTINGS: &str = r#"
+project "SampleKmp"
+module "."
+"#;
+
 fn loader_with_project() -> MapLoader {
     let mut map = HashMap::new();
     map.insert(
@@ -116,6 +131,7 @@ fn loader_with_project() -> MapLoader {
         CONVENTIONS.to_owned(),
     );
     map.insert(PathBuf::from("/proj/libs.ulb"), LIBS.to_owned());
+    map.insert(PathBuf::from("/proj/settings.ulb"), SETTINGS.to_owned());
     MapLoader(map)
 }
 
@@ -143,8 +159,8 @@ fn worked_example_plus_unknown_apply_flags_one_error() {
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].message, "unknown convention 'nonexistent'");
     let range = diagnostics[0].range;
-    assert_eq!(range.start.line, 53);
-    assert_eq!(range.end.line, 53);
+    assert_eq!(range.start.line, 54);
+    assert_eq!(range.end.line, 54);
 }
 
 #[test]
@@ -168,4 +184,29 @@ fn mid_edit_source_still_produces_parse_diagnostics() {
             .iter()
             .all(|d| d.severity == Some(lsp_types::DiagnosticSeverity::ERROR))
     );
+}
+
+#[test]
+fn worked_example_settings_file_is_clean() {
+    let mut engine = DiagnosticEngine::with_loader(loader_with_project());
+    let settings = url("/proj/settings.ulb");
+    engine.upsert(settings.clone(), Document::new(SETTINGS.to_owned(), 1));
+    let diagnostics = engine.diagnostics_for(&settings);
+    assert!(
+        diagnostics.is_empty(),
+        "expected no diagnostics, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn settings_unknown_key_surfaces_semantic_error() {
+    let mut engine = DiagnosticEngine::new();
+    let settings = url("/proj/settings.ulb");
+    engine.upsert(
+        settings.clone(),
+        Document::new(format!("{SETTINGS}\nmodl \"typo\"\n"), 1),
+    );
+    let diagnostics = engine.diagnostics_for(&settings);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].range.start.line, 3);
 }
