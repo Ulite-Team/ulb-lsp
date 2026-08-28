@@ -27,9 +27,11 @@
 
 #![warn(missing_docs)]
 
+pub mod completion;
 pub mod diagnostics;
 pub mod document;
 pub mod navigation;
+pub mod plugin_schema;
 pub mod role;
 pub mod utf16;
 

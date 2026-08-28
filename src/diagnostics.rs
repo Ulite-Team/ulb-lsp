@@ -6,8 +6,9 @@
 //! tests can drive it directly; the server in `main.rs` is a thin adapter
 //! that calls [`DiagnosticEngine::diagnostics_for`] and publishes.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, Range, Url};
 use ulb_lang::ast::{ElseBranch, IfKind, Statement, StatementKind};
@@ -16,6 +17,7 @@ use ulb_lang::eval::{
     Definitions, collect_definitions_lint, evaluate_build_lint, evaluate_settings,
 };
 use ulb_lang::parser::{Parsed, parse};
+use ulb_schema::{PluginSchema, plugin::default_plugins_cache_dir};
 
 use crate::document::{Document, DocumentStore};
 use crate::role::{Role, role_of};
@@ -30,6 +32,14 @@ pub trait SourceLoader {
     /// Returns the text of the file at `path`, or `None` if it cannot be
     /// read (missing file, permission denied, non-UTF-8 content).
     fn load(&self, path: &Path) -> Option<String>;
+
+    /// Returns the raw bytes of the file at `path`, or `None` if it
+    /// cannot be read. Defaults to reading the local filesystem; an
+    /// in-memory loader overrides it only when it must supply binary
+    /// artifacts (a plugin's cached `.wasm`, for schema extraction).
+    fn load_bytes(&self, path: &Path) -> Option<Vec<u8>> {
+        std::fs::read(path).ok()
+    }
 }
 
 /// A [`SourceLoader`] that reads the local filesystem.
@@ -58,6 +68,8 @@ impl SourceLoader for DiskLoader {
 pub struct DiagnosticEngine<L> {
     store: DocumentStore,
     loader: L,
+    plugin_cache_dir: Option<PathBuf>,
+    schema_cache: RefCell<BTreeMap<PathBuf, Option<PluginSchema>>>,
 }
 
 impl DiagnosticEngine<DiskLoader> {
@@ -75,7 +87,43 @@ impl<L: SourceLoader> DiagnosticEngine<L> {
         Self {
             store: DocumentStore::new(),
             loader,
+            plugin_cache_dir: None,
+            schema_cache: RefCell::new(BTreeMap::new()),
         }
+    }
+
+    /// Points plugin schema lookup at `dir` instead of the default
+    /// `$HOME/.cache/uliab/plugins` directory. The LSP reads the cached
+    /// plugin `.wasm` on disk to extract its embedded config schema; tests
+    /// inject a scratch directory so they do not depend on `$HOME`.
+    pub fn set_plugin_cache_dir(&mut self, dir: PathBuf) {
+        self.plugin_cache_dir = Some(dir);
+    }
+
+    /// The directory used to locate cached plugin artifacts.
+    pub(crate) fn plugin_cache_dir(&self) -> PathBuf {
+        self.plugin_cache_dir
+            .clone()
+            .unwrap_or_else(default_plugins_cache_dir)
+    }
+
+    /// Reads the raw bytes of the file at `path` through the loader.
+    pub(crate) fn load_bytes(&self, path: &Path) -> Option<Vec<u8>> {
+        self.loader.load_bytes(path)
+    }
+
+    /// Returns a copy of the cached schema for `wasm_path`, or `None`
+    /// when the path has not been resolved yet. Cached paths that
+    /// resolved to no schema are memoized as `Some(None)` so a schemaless
+    /// plugin is not re-read on every request.
+    pub(crate) fn schema_cached(&self, wasm_path: &Path) -> Option<Option<PluginSchema>> {
+        self.schema_cache.borrow().get(wasm_path).cloned()
+    }
+
+    /// Stores the extracted schema for `wasm_path` in the per-engine
+    /// cache.
+    pub(crate) fn cache_schema(&self, wasm_path: PathBuf, schema: Option<PluginSchema>) {
+        self.schema_cache.borrow_mut().insert(wasm_path, schema);
     }
 
     /// Inserts or replaces the open document at `uri`.
@@ -259,7 +307,7 @@ impl<L: SourceLoader> DiagnosticEngine<L> {
     /// inside them never touch the process or filesystem. Both files are
     /// globally visible to every `build.ulb` (GRAMMAR.md §6.3/§6.4), which
     /// is why name resolution must see them together.
-    fn resolve_definitions(&self, uri: &Url) -> Definitions {
+    pub(crate) fn resolve_definitions(&self, uri: &Url) -> Definitions {
         let mut defs = Definitions::default();
         for file_name in ["conventions.ulb", "libs.ulb"] {
             let Some(role_url) = uri.join(file_name).ok() else {

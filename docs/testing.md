@@ -9,11 +9,14 @@ the unit tests below.
 ## Where the tests live
 
 - **Doc-tests** inside `src/lib.rs`, `src/document.rs`, `src/utf16.rs`,
-  `src/navigation.rs`, `src/role.rs` — small, executable examples of the
-  public API.
+  `src/navigation.rs`, `src/completion.rs`, `src/role.rs` — small,
+  executable examples of the public API.
 - **Unit tests** in `src/document.rs` (edit application), `src/utf16.rs`
   (conversion boundary rules), `src/diagnostics.rs` (the engine's
-  diagnostic classes), `src/navigation.rs` (hover/goto resolution).
+  diagnostic classes), `src/navigation.rs` (hover/goto resolution),
+  `src/plugin_schema.rs` (scope classification + completion item kinds),
+  `src/completion.rs` (vocabulary, plugin-schema loading, caching,
+  hover-on-field).
 - **Integration tests** in `tests/worked_example.rs` — the engine against
   realistic project sources modeled on `examples/sample-kmp` from the
   Uliab repository.
@@ -55,6 +58,26 @@ code path the server runs.
   (`goto_definition_points_at_convention_name_in_conventions_ulb`), is
   `None` for unknown conventions, and honors an open `conventions.ulb`
   over disk.
+
+## Completion behaviors pinned by tests
+
+- Inside a plugin block the schema keys complete
+  (`inside_plugin_block_offers_the_schema_key`); at top level both core
+  words and the applied plugin's block name complete
+  (`top_level_offers_core_and_plugin_block_name`).
+- `deps {}` offers only dependency scopes (never `apply`); `run {}` offers
+  the task actions (`inside_deps_offers_only_dependency_scopes`,
+  `inside_run_offers_task_actions`).
+- Non-build roles answer no completion
+  (`non_build_role_yields_no_completion`).
+- Hover on a key absent from the schema is `None`, and a schema is fetched
+  from disk once then served from the cache
+  (`hover_none_for_key_not_in_schema`, `schema_is_cached_after_first_request`).
+- A missing plugin artifact degrades to core vocabulary rather than
+  failing (`missing_wasm_degrades_gracefully`).
+- Scope classification: `deps`/`run`/`task body`/top level are core; an
+  unknown block name falls back to top-level; nested object fields track
+  the inner schema field (`plugin_schema.rs` tests).
 
 ## Position handling pinned by tests
 
