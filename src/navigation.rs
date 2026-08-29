@@ -7,6 +7,12 @@
 //! preview the convention body and jump to it. They are engine methods
 //! ([`DiagnosticEngine::hover`], [`DiagnosticEngine::goto_definition`]) so
 //! they share the same open-document store and file loader as diagnostics.
+//!
+//! [`DiagnosticEngine::hover`] is also the entry point the completion module
+//! borrows for plugin-owned blocks: when the cursor is not on an `apply`
+//! target, hover delegates to the plugin-config-schema hover, so one
+//! `hover` call covers both the core convention case here and the
+//! schema-backed plugin-field case defined in `crate::completion`.
 
 use std::collections::BTreeMap;
 
@@ -34,10 +40,11 @@ pub struct ConventionLocation {
 }
 
 impl<L: SourceLoader> DiagnosticEngine<L> {
-    /// Hover content for the convention named by an `apply` statement under
-    /// `position` in the document at `uri`. Shows the convention's name and
-    /// its body; an `apply` whose convention is not defined in the adjacent
-    /// `conventions.ulb` is reported as such.
+    /// Hover content for the construct under `position` in the document at
+    /// `uri`. An `apply` statement is rendered with its convention's name
+    /// and body; a plugin-owned key inside a `build.ulb` block is rendered
+    /// with its config-schema type and description (see
+    /// [`crate::completion`]). Anything else produces no hover.
     ///
     /// # Examples
     ///
@@ -78,7 +85,9 @@ impl<L: SourceLoader> DiagnosticEngine<L> {
     #[must_use]
     pub fn hover(&self, uri: &Url, position: Position) -> Option<Hover> {
         let text = self.text_of(uri)?;
-        let target = apply_target_at(&text, position)?;
+        let Some(target) = apply_target_at(&text, position) else {
+            return self.plugin_field_hover(uri, position);
+        };
         let name_range = span_to_range(&text, target.name_span);
         let conventions_uri = uri.join("conventions.ulb").ok()?;
         let conventions_text = self.text_of(&conventions_uri);

@@ -9,7 +9,8 @@ use std::sync::Mutex;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-    Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
     HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, OneOf,
     ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
@@ -89,6 +90,13 @@ impl LanguageServer for Backend {
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    // Every item carries full documentation, so resolve is
+                    // a no-op and not advertised.
+                    resolve_provider: Some(false),
+                    trigger_characters: Some(vec![".".to_owned()]),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -173,6 +181,18 @@ impl LanguageServer for Backend {
             .lock()
             .expect("engine lock")
             .hover(&position.text_document.uri, position.position))
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let position = params.text_document_position;
+        if !Self::is_ulb_file(&position.text_document.uri) {
+            return Ok(None);
+        }
+        Ok(self
+            .engine
+            .lock()
+            .expect("engine lock")
+            .completion(&position.text_document.uri, position.position))
     }
 
     async fn goto_definition(

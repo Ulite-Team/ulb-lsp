@@ -57,3 +57,7 @@ alias in `deps {}`, a `fn` call site) without changing the structure:
 find target under cursor → parse the owning file → locate definition.
 Only conventions are wired up today; the targets map is `BTreeMap` so
 definition lookup is deterministic.
+
+`hover` also falls back to plugin-field documentation when the cursor is
+not on an `apply` target: a position inside a plugin-owned block returns
+the schema field description (see [completion.md](completion.md)).

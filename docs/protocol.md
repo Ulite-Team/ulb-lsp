@@ -20,9 +20,18 @@ logic here.
 | `textDocumentSync` | `INCREMENTAL`, with `openClose` and `save` |
 | `hoverProvider` | `true` |
 | `definitionProvider` | `true` |
+| `completionProvider` | `triggerCharacters: ['.']`, `resolveProvider: false` |
 
 Position encoding is not advertised (defaults to UTF-16, which is what the
 engine's conversions target — see [utf16.md](utf16.md)).
+
+## Completion
+
+A `textDocument/completion` handler answers on `*.ulb` files whose role
+is `Build` (`build.ulb` or similar); non-build roles return `Ok(None)`.
+The engine splits the cursor position into a core scope or a
+plugin-owned block (via the plugin config schema) and returns the
+appropriate vocabulary. See [completion.md](completion.md).
 
 ## Document lifecycle
 

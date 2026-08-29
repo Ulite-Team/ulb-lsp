@@ -22,6 +22,9 @@ library returns.
   so dead code is still checked.
 - Hover and goto-definition from `apply "name"` to the `convention NAME`
   in the adjacent `conventions.ulb`.
+- Completion inside `build.ulb` — core vocabulary per scope plus the keys
+  of plugin-owned blocks read from the plugin's config-schema artifact —
+  and hover on those plugin config keys.
 - Re-analysis of all open `build.ulb` files when `conventions.ulb`
   changes.
 - UTF-16-correct positions for incremental edits, including multibyte
@@ -49,7 +52,7 @@ cargo clippy -- -D warnings
 
 Point an LSP client at `target/release/ulb-lsp` with a `**/*.ulb`
 document selector. The server speaks stdio LSP with incremental sync,
-hover, and definition support. See [docs/using.md](docs/using.md).
+hover, definition, and completion support. See [docs/using.md](docs/using.md).
 
 ## Documentation
 
