@@ -7,6 +7,12 @@
 //! preview the convention body and jump to it. They are engine methods
 //! ([`DiagnosticEngine::hover`], [`DiagnosticEngine::goto_definition`]) so
 //! they share the same open-document store and file loader as diagnostics.
+//!
+//! [`DiagnosticEngine::hover`] is also the entry point the completion module
+//! borrows for plugin-owned blocks: when the cursor is not on an `apply`
+//! target, hover delegates to the plugin-config-schema hover, so one
+//! `hover` call covers both the core convention case here and the
+//! schema-backed plugin-field case defined in `crate::completion`.
 
 use std::collections::BTreeMap;
 

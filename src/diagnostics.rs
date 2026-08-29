@@ -38,7 +38,16 @@ pub trait SourceLoader {
     /// in-memory loader overrides it only when it must supply binary
     /// artifacts (a plugin's cached `.wasm`, for schema extraction).
     fn load_bytes(&self, path: &Path) -> Option<Vec<u8>> {
-        std::fs::read(path).ok()
+        match std::fs::read(path) {
+            Ok(bytes) => Some(bytes),
+            Err(err) => {
+                eprintln!(
+                    "ulb-lsp: could not read plugin artifact {}: {err}",
+                    path.display()
+                );
+                None
+            }
+        }
     }
 }
 

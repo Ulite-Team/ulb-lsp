@@ -477,6 +477,24 @@ mod tests {
         let mut engine = engine_with_android(reads);
         let labels = labels_of(&mut engine, &build_uri(), "android {\n  comp\n}\n");
         assert!(labels.iter().any(|l| l == "compileSdk"));
+        // Inside a plugin block only schema keys belong; the core
+        // vocabulary must not leak in.
+        assert!(
+            !labels
+                .iter()
+                .any(|l| l == "apply" || l == "deps" || l == "plugin"),
+            "core vocabulary leaked into plugin scope: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn inside_deps_offers_only_dependency_scopes() {
+        let reads = Rc::new(Cell::new(0));
+        let mut engine = engine_with_android(reads);
+        let labels = labels_of(&mut engine, &build_uri(), "deps {\n  imp\n}\n");
+        assert!(labels.iter().any(|l| l == "implementation"));
+        // `apply` is a top-level statement, not a deps scope.
+        assert!(!labels.iter().any(|l| l == "apply"));
     }
 
     #[test]
@@ -499,16 +517,6 @@ mod tests {
         assert!(labels.contains(&"apply"));
         // The applied plugin's top-level block name completes too.
         assert!(labels.contains(&"android"));
-    }
-
-    #[test]
-    fn inside_deps_offers_only_dependency_scopes() {
-        let reads = Rc::new(Cell::new(0));
-        let mut engine = engine_with_android(reads);
-        let labels = labels_of(&mut engine, &build_uri(), "deps {\n  imp\n}\n");
-        assert!(labels.iter().any(|l| l == "implementation"));
-        // `apply` is a top-level statement, not a deps scope.
-        assert!(!labels.iter().any(|l| l == "apply"));
     }
 
     #[test]
@@ -571,10 +579,12 @@ mod tests {
         // The plugin .wasm is read once, on the first request, then cached.
         engine.completion(&uri, Position::new(1, 5)).expect("first");
         assert_eq!(reads.get(), 1);
-        engine
-            .completion(&uri, Position::new(1, 5))
-            .expect("second");
+        let labels = labels_of(&mut engine, &uri, "android {\n  comp\n}\n");
         assert_eq!(reads.get(), 1, "second request must hit the cache");
+        assert!(
+            labels.iter().any(|l| l == "compileSdk"),
+            "cached answer must still be correct: {labels:?}"
+        );
     }
 
     #[test]
@@ -604,6 +614,107 @@ mod tests {
         let CompletionResponse::Array(items) = response else {
             panic!("expected array");
         };
-        assert!(!items.is_empty(), "core vocabulary still offered");
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(
+            labels.contains(&"deps"),
+            "core top-level vocabulary still offered: {labels:?}"
+        );
+        assert!(
+            !labels.contains(&"compileSdk"),
+            "schema keys must not appear without an artifact: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn unversioned_plugin_value_degrades_to_core() {
+        // A `plugins { android = "ulite/android" }` entry without an `@`
+        // version has no cached-artifact path and is simply skipped.
+        let reads = Rc::new(Cell::new(0));
+        let mut text = HashMap::new();
+        text.insert(
+            PathBuf::from("/proj/libs.ulb"),
+            "plugins { android = \"ulite/android\" }\n".to_owned(),
+        );
+        let mut engine = DiagnosticEngine::with_loader(CountingLoader {
+            text,
+            bytes: HashMap::new(),
+            reads,
+        });
+        engine.set_plugin_cache_dir(PathBuf::from("/cache"));
+        let uri = build_uri();
+        engine.upsert(
+            uri.clone(),
+            Document::new("android {\n  comp\n}\n".to_owned(), 1),
+        );
+        let labels = labels_of(&mut engine, &uri, "android {\n  comp\n}\n");
+        assert!(
+            labels.iter().any(|l| l == "deps"),
+            "core vocabulary present"
+        );
+        assert!(!labels.iter().any(|l| l == "compileSdk"));
+    }
+
+    #[test]
+    fn non_coordinate_plugin_value_degrades_to_core() {
+        // A non-string `plugins {}` value cannot be a plugin coordinate and
+        // is skipped without erroring.
+        let reads = Rc::new(Cell::new(0));
+        let mut text = HashMap::new();
+        text.insert(
+            PathBuf::from("/proj/libs.ulb"),
+            "plugins { android = true }\n".to_owned(),
+        );
+        let mut engine = DiagnosticEngine::with_loader(CountingLoader {
+            text,
+            bytes: HashMap::new(),
+            reads,
+        });
+        engine.set_plugin_cache_dir(PathBuf::from("/cache"));
+        let labels = labels_of(&mut engine, &build_uri(), "android {\n  comp\n}\n");
+        assert!(
+            labels.iter().any(|l| l == "deps"),
+            "core vocabulary present"
+        );
+        assert!(!labels.iter().any(|l| l == "compileSdk"));
+    }
+
+    #[test]
+    fn hover_on_known_key_returns_field_description() {
+        let reads = Rc::new(Cell::new(0));
+        let mut engine = engine_with_android(reads);
+        let uri = build_uri();
+        engine.upsert(
+            uri.clone(),
+            Document::new("android {\n  compileSdk 37\n}\n".to_owned(), 1),
+        );
+        let hover = engine
+            .plugin_field_hover(&uri, Position::new(1, 3))
+            .expect("hover on a known key");
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(
+            markup.value.contains("The compile SDK version."),
+            "hover value: {}",
+            markup.value
+        );
+    }
+
+    #[test]
+    fn hover_public_api_falls_back_to_plugin_field() {
+        let reads = Rc::new(Cell::new(0));
+        let mut engine = engine_with_android(reads);
+        let uri = build_uri();
+        engine.upsert(
+            uri.clone(),
+            Document::new("android {\n  compileSdk 37\n}\n".to_owned(), 1),
+        );
+        let hover = engine
+            .hover(&uri, Position::new(1, 3))
+            .expect("hover falls back to plugin field");
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(markup.value.contains("The compile SDK version."));
     }
 }

@@ -28,7 +28,7 @@ The engine answers from a hardcoded slice of the grammar:
 - Top-level statements: `plugin`, `apply`, `deps`, `task`, `if`, `else`,
   `description`.
 - `deps {}` scopes: `implementation`, `api`, `testImplementation`,
-  `androidTestImplementation`, `compileOnly`, `runtimeOnly`.
+  `androidTestImplementation`, `compileOnly`, `runtimeOnly`, `ksp`.
 - `run {}` actions: `exec`, `copy`.
 - `task NAME { }` body: `description`, `dependsOn`, `run`.
 
@@ -49,8 +49,8 @@ value:
    `PluginSchema`.
 
 The content-addressed path (name + version) is stable, so results are
-memoized in the engine's `schema_cache` for the document's lifetime — a
-schema is read from disk once per build session, not per keystroke. A
+memoized in the engine's `schema_cache` for the engine's lifetime — a
+schema is read from disk once per server run, not per keystroke. A
 missing artifact degrades gracefully: the engine still answers with the
 core vocabulary rather than erroring.
 

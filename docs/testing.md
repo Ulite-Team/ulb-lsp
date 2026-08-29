@@ -61,7 +61,8 @@ code path the server runs.
 
 ## Completion behaviors pinned by tests
 
-- Inside a plugin block the schema keys complete
+- Inside a plugin block the schema keys complete — and the core vocabulary
+  does not leak in
   (`inside_plugin_block_offers_the_schema_key`); at top level both core
   words and the applied plugin's block name complete
   (`top_level_offers_core_and_plugin_block_name`).
@@ -70,14 +71,36 @@ code path the server runs.
   `inside_run_offers_task_actions`).
 - Non-build roles answer no completion
   (`non_build_role_yields_no_completion`).
-- Hover on a key absent from the schema is `None`, and a schema is fetched
-  from disk once then served from the cache
+- Hover on a known key returns its description with the key's range
+  (`hover_on_known_key_returns_field_description`); on a key absent from
+  the schema it is `None`; and a schema is fetched from disk once then
+  served from the cache with a correct answer
   (`hover_none_for_key_not_in_schema`, `schema_is_cached_after_first_request`).
-- A missing plugin artifact degrades to core vocabulary rather than
-  failing (`missing_wasm_degrades_gracefully`).
-- Scope classification: `deps`/`run`/`task body`/top level are core; an
-  unknown block name falls back to top-level; nested object fields track
-  the inner schema field (`plugin_schema.rs` tests).
+- The public `hover` falls back to the plugin field
+  (`hover_public_api_falls_back_to_plugin_field`).
+- A missing plugin artifact, an unversioned plugin value, and a
+  non-coordinate plugin value all degrade to core vocabulary rather than
+  failing (`missing_wasm_degrades_gracefully`,
+  `unversioned_plugin_value_degrades_to_core`,
+  `non_coordinate_plugin_value_degrades_to_core`).
+- Scope classification: `deps`/`run`/`task body`/top level are core;
+  `<sourceSet>.deps` is still core-deps; `if`/`else if` chains inherit the
+  enclosing scope; an unknown block name falls back to top-level; and
+  nested object fields track the inner schema field (`plugin_schema.rs`
+  tests: `dotted_deps_block_is_core_deps_scope`,
+  `if_branch_inherits_enclosing_core_scope`,
+  `else_if_chain_keeps_enclosing_scope`, `unknown_block_is_core_top_not_plugin`,
+  `nested_object_scope_tracks_the_inner_field`).
+- Completion-item kinds: object blocks are snippets, an object without
+  nested properties is a plain field, an enum without variants is enum-only,
+  and empty inputs produce no items
+  (`properties_completions_surface_scalar_object_and_enum`,
+  `object_with_empty_properties_is_a_field_not_a_snippet`,
+  `enum_with_empty_variants_is_enum_only`,
+  `properties_completions_on_empty_input_is_empty`).
+- Key lookup finds pair keys and block headers, and reaches the final
+  `else` of an `else if` chain (`key_at_finds_pair_key_and_block_header`,
+  `key_at_reaches_the_else_if_else_branch`).
 
 ## Position handling pinned by tests
 
